@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0c0a09" />
+  <title>Nightline — AI Phone Companion</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bg: '#0c0a09', surface: '#1c1917', 'surface-2': '#292524',
+            fg: '#fafaf9', muted: '#a8a29e', accent: '#e4a04a',
+            'accent-dim': '#c4853a', end: '#c4493a', ok: '#4ade80',
+          },
+          fontFamily: {
+            display: ['Fraunces', 'serif'],
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+          },
+        },
+      },
+    }
+  </script>
+  <style>
+    html, body, #root { height: 100%; margin: 0; background: #0c0a09; color: #fafaf9; font-family: Inter, system-ui, sans-serif; }
+    .font-display { font-family: Fraunces, serif; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.26.0/babel.min.js"></script>
+  <script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const PROFILE_KEY = 'nightline.profile.v1';
+const COUNTRIES = [
+  { iso: 'US', name: 'United States', code: '1' },
+  { iso: 'GB', name: 'United Kingdom', code: '44' },
+  { iso: 'IR', name: 'Iran', code: '98' },
+  { iso: 'DE', name: 'Germany', code: '49' },
+  { iso: 'FR', name: 'France', code: '33' },
+  { iso: 'JP', name: 'Japan', code: '81' },
+  { iso: 'AE', name: 'United Arab Emirates', code: '971' },
+  { iso: 'SA', name: 'Saudi Arabia', code: '966' },
+  { iso: 'TR', name: 'Turkey', code: '90' },
+  { iso: 'IN', name: 'India', code: '91' },
+  { iso: 'PK', name: 'Pakistan', code: '92' },
+  { iso: 'CA', name: 'Canada', code: '1' },
+  { iso: 'AU', name: 'Australia', code: '61' },
+  { iso: 'BR', name: 'Brazil', code: '55' },
+  { iso: 'MX', name: 'Mexico', code: '52' },
+  { iso: 'IT', name: 'Italy', code: '39' },
+  { iso: 'ES', name: 'Spain', code: '34' },
+  { iso: 'NL', name: 'Netherlands', code: '31' },
+  { iso: 'SE', name: 'Sweden', code: '46' },
+  { iso: 'NO', name: 'Norway', code: '47' },
+  { iso: 'PL', name: 'Poland', code: '48' },
+  { iso: 'RU', name: 'Russia', code: '7' },
+  { iso: 'KR', name: 'South Korea', code: '82' },
+  { iso: 'CN', name: 'China', code: '86' },
+  { iso: 'EG', name: 'Egypt', code: '20' },
+  { iso: 'IQ', name: 'Iraq', code: '964' },
+  { iso: 'AF', name: 'Afghanistan', code: '93' },
+  { iso: 'NG', name: 'Nigeria', code: '234' },
+  { iso: 'ZA', name: 'South Africa', code: '27' },
+  { iso: 'AR', name: 'Argentina', code: '54' },
+].sort((a, b) => a.name.localeCompare(b.name));
+
+const LANG_BY = { IR: 'fa', AF: 'fa', SA: 'ar', AE: 'ar', EG: 'ar', IQ: 'ar', US: 'en', GB: 'en', DE: 'de', FR: 'fr', JP: 'ja', PK: 'ur', TR: 'tr', RU: 'ru' };
+
+function loadProfile() {
+  try {
+    const p = JSON.parse(localStorage.getItem(PROFILE_KEY) || 'null');
+    return p && p.apiKey && p.e164 ? p : null;
+  } catch { return null; }
+}
+function saveProfile(p) { localStorage.setItem(PROFILE_KEY, JSON.stringify(p)); }
+
+async function groqChat(apiKey, messages) {
+  const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages, temperature: 0.7, max_tokens: 400 }),
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+async function groqTranscribe(apiKey, blob, language) {
+  const form = new FormData();
+  form.append('file', blob, 'audio.webm');
+  form.append('model', 'whisper-large-v3-turbo');
+  if (language) form.append('language', language);
+  form.append('response_format', 'json');
+  const r = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + apiKey },
+    body: form,
+  });
+  if (!r.ok) throw new Error(await r.text());
+  const d = await r.json();
+  return (d.text || '').trim();
+}
+
+async function groqSpeech(apiKey, text) {
+  const r = await fetch('https://api.groq.com/openai/v1/audio/speech', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'canopylabs/orpheus-v1-english',
+      voice: 'troy',
+      input: text.slice(0, 200),
+      response_format: 'wav',
+    }),
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.blob();
+}
+
+function speakDevice(text, lang) {
+  return new Promise((resolve) => {
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = lang === 'fa' ? 'fa-IR' : lang === 'ar' ? 'ar-SA' : 'en-US';
+    u.onend = () => resolve();
+    u.onerror = () => resolve();
+    speechSynthesis.cancel();
+    speechSynthesis.speak(u);
+  });
+}
+
+function Setup({ initial, onSave }) {
+  const [apiKey, setApiKey] = useState(initial?.apiKey || '');
+  const [userName, setUserName] = useState(initial?.userName || '');
+  const [iso, setIso] = useState(initial?.country || 'US');
+  const [national, setNational] = useState(initial?.nationalNumber || '');
+  const [showKey, setShowKey] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [error, setError] = useState('');
+  const country = COUNTRIES.find(c => c.iso === iso) || COUNTRIES[0];
+  const filtered = COUNTRIES.filter(c =>
+    !search || c.name.toLowerCase().includes(search.toLowerCase()) ||
+    c.iso.toLowerCase().includes(search.toLowerCase()) || c.code.includes(search)
+  );
+
+  function handleSave() {
+    setError('');
+    if (!apiKey.trim().startsWith('gsk_')) {
+      setError('Paste a valid Groq API key (starts with gsk_)');
+      return;
+    }
+    const digits = national.replace(/\D/g, '');
+    if (digits.length < 6) {
+      setError('Enter a phone number');
+      return;
+    }
+    const e164 = '+' + country.code + digits;
+    onSave({
+      apiKey: apiKey.trim(),
+      userName: userName.trim() || 'Friend',
+      country: country.iso,
+      nationalNumber: digits,
+      e164,
+      language: LANG_BY[country.iso] || 'en',
+    });
+  }
+
+  return (
+    <div className="flex-1 flex flex-col max-w-md mx-auto w-full px-5 py-8 min-h-full">
+      <header className="mb-8">
+        <p className="text-accent text-xs font-medium tracking-widest uppercase mb-2">Nightline</p>
+        <h1 className="font-display text-3xl font-semibold leading-tight">Your AI phone line</h1>
+        <p className="text-muted mt-2 text-sm leading-relaxed">
+          Paste a Groq key, add your number (Iran +98 included), then press Call Me.
+        </p>
+      </header>
+      <div className="space-y-5 flex-1">
+        <label className="block">
+          <span className="text-xs text-muted uppercase tracking-wide">Your name</span>
+          <input className="mt-1.5 w-full rounded-xl bg-surface border border-surface-2 px-4 py-3 outline-none focus:border-accent"
+            value={userName} onChange={e => setUserName(e.target.value)} placeholder="How should the AI address you?" />
+        </label>
+        <label className="block">
+          <span className="text-xs text-muted uppercase tracking-wide">Groq API key</span>
+          <div className="mt-1.5 relative">
+            <input type={showKey ? 'text' : 'password'}
+              className="w-full rounded-xl bg-surface border border-surface-2 px-4 py-3 pr-20 outline-none focus:border-accent font-mono text-sm"
+              value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="gsk_…" autoComplete="off" />
+            <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted" onClick={() => setShowKey(v => !v)}>
+              {showKey ? 'Hide' : 'Show'}
+            </button>
+          </div>
+        </label>
+        <div>
+          <span className="text-xs text-muted uppercase tracking-wide">Phone number</span>
+          <div className="mt-1.5 flex gap-2">
+            <button type="button" onClick={() => setOpen(true)}
+              className="shrink-0 rounded-xl bg-surface border border-surface-2 px-3 py-3 text-sm font-medium min-w-[5.5rem]">
+              +{country.code}
+            </button>
+            <input className="flex-1 rounded-xl bg-surface border border-surface-2 px-4 py-3 outline-none focus:border-accent"
+              value={national} onChange={e => setNational(e.target.value)} placeholder="phone number" inputMode="tel" />
+          </div>
+          <p className="mt-1 text-xs text-muted">Iran (+98) works for browser voice.</p>
+        </div>
+      </div>
+      {error && <div className="mt-4 rounded-xl bg-end/10 border border-end/30 px-4 py-3 text-sm text-end">{error}</div>}
+      <button onClick={handleSave} className="mt-6 w-full rounded-2xl bg-accent text-bg font-semibold py-4 text-base">Save line</button>
+      {open && (
+        <div className="fixed inset-0 z-50 bg-bg/90 backdrop-blur-sm flex flex-col">
+          <div className="max-w-md mx-auto w-full flex flex-col h-full px-4 pt-6 pb-8">
+            <div className="flex items-center gap-3 mb-4">
+              <input autoFocus className="flex-1 rounded-xl bg-surface border border-surface-2 px-4 py-3 outline-none"
+                placeholder="Search country…" value={search} onChange={e => setSearch(e.target.value)} />
+              <button className="text-muted px-2" onClick={() => { setOpen(false); setSearch(''); }}>Close</button>
+            </div>
+            <div className="flex-1 overflow-y-auto rounded-xl bg-surface border border-surface-2">
+              {filtered.map(c => (
+                <button key={c.iso} className={'w-full text-left px-4 py-3 flex justify-between border-b border-surface-2 ' + (c.iso === iso ? 'bg-accent/10' : '')}
+                  onClick={() => { setIso(c.iso); setOpen(false); setSearch(''); }}>
+                  <span className="font-medium">{c.name}</span>
+                  <span className="text-muted text-sm">+{c.code}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Ready({ profile, onCall, onEdit }) {
+  return (
+    <div className="flex-1 flex flex-col max-w-md mx-auto w-full px-5 py-10 min-h-full">
+      <header className="mb-10">
+        <p className="text-accent text-xs font-medium tracking-widest uppercase mb-2">Nightline</p>
+        <h1 className="font-display text-3xl font-semibold">Ready to call</h1>
+      </header>
+      <div className="rounded-2xl bg-surface border border-surface-2 p-5 mb-8">
+        <div className="flex justify-between mb-4">
+          <span className="text-xs text-muted uppercase tracking-wide">Your line</span>
+          <button onClick={onEdit} className="text-xs text-accent">Edit</button>
+        </div>
+        <p className="font-display text-xl font-medium">{profile.userName}</p>
+        <p className="text-muted mt-1 text-sm">{profile.e164} · {profile.country}</p>
+        <p className="text-muted mt-3 text-xs">Language: <span className="text-fg">{profile.language}</span></p>
+      </div>
+      <div className="flex-1 flex flex-col items-center justify-center">
+        <button onClick={onCall}
+          className="w-40 h-40 rounded-full bg-accent text-bg font-display text-xl font-semibold shadow-[0_0_60px_rgba(228,160,74,0.35)]">
+          Call Me
+        </button>
+        <p className="mt-6 text-muted text-sm text-center max-w-[240px]">Mic permission required. Talk or type.</p>
+      </div>
+    </div>
+  );
+}
+
+function Ringing({ profile, onAnswer, onDecline }) {
+  useEffect(() => {
+    let ctx, osc, interval;
+    try {
+      ctx = new AudioContext();
+      osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine'; osc.frequency.value = 440; gain.gain.value = 0.08;
+      osc.connect(gain); gain.connect(ctx.destination); osc.start();
+      let up = true;
+      interval = setInterval(() => {
+        gain.gain.setTargetAtTime(up ? 0.12 : 0.02, ctx.currentTime, 0.05);
+        up = !up;
+      }, 400);
+    } catch {}
+    return () => {
+      clearInterval(interval);
+      try { osc && osc.stop(); ctx && ctx.close(); } catch {}
+    };
+  }, []);
+  return (
+    <div className="flex-1 flex flex-col items-center justify-between max-w-md mx-auto w-full px-5 py-16 min-h-full">
+      <div className="text-center pt-8">
+        <p className="text-muted text-sm mb-2">Incoming call</p>
+        <div className="w-24 h-24 rounded-full bg-accent/20 flex items-center justify-center mx-auto mb-5 animate-pulse">
+          <div className="w-16 h-16 rounded-full bg-accent/40 flex items-center justify-center">
+            <span className="font-display text-2xl text-accent">AI</span>
+          </div>
+        </div>
+        <h1 className="font-display text-2xl font-semibold">Nightline</h1>
+        <p className="text-muted mt-1 text-sm">Calling {profile.userName}</p>
+      </div>
+      <div className="flex gap-10 pb-10">
+        <button onClick={onDecline} className="flex flex-col items-center gap-2">
+          <span className="w-16 h-16 rounded-full bg-end flex items-center justify-center text-white text-2xl">✕</span>
+          <span className="text-xs text-muted">Decline</span>
+        </button>
+        <button onClick={onAnswer} className="flex flex-col items-center gap-2">
+          <span className="w-16 h-16 rounded-full bg-ok flex items-center justify-center text-bg text-2xl">✓</span>
+          <span className="text-xs text-muted">Answer</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Live({ profile, onEnd }) {
+  const [lines, setLines] = useState([]);
+  const [status, setStatus] = useState('connecting');
+  const [error, setError] = useState('');
+  const [typed, setTyped] = useState('');
+  const [micLevel, setMicLevel] = useState(0);
+  const historyRef = useRef([]);
+  const abortRef = useRef(false);
+  const mediaRef = useRef(null);
+  const recRef = useRef(null);
+  const chunksRef = useRef([]);
+  const analysingRef = useRef(false);
+  const canvasRef = useRef(null);
+  const animRef = useRef(0);
+  const push = useCallback((line) => setLines(prev => [...prev, line]), []);
+
+  async function speak(text) {
+    if (abortRef.current) return;
+    setStatus('speaking');
+    const lang = profile.language;
+    if (lang === 'en' || lang === 'ar') {
+      try {
+        const blob = await groqSpeech(profile.apiKey, text);
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        await new Promise((res, rej) => { audio.onended = res; audio.onerror = rej; audio.play().catch(rej); });
+        URL.revokeObjectURL(url);
+        return;
+      } catch (e) { console.warn(e); }
+    }
+    await speakDevice(text, lang);
+  }
+
+  async function chat(userText) {
+    setStatus('thinking');
+    historyRef.current.push({ role: 'user', content: userText });
+    push({ role: 'user', text: userText });
+    try {
+      const data = await groqChat(profile.apiKey, [
+        { role: 'system', content: 'You are Nightline, a warm personal AI phone companion speaking to ' + profile.userName + '. Keep replies short (1-3 sentences), conversational, and natural for voice. Identify as an AI when asked. Prefer language: ' + profile.language + '.' },
+        ...historyRef.current.slice(-12),
+      ]);
+      const reply = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || 'Sorry, I lost that.').trim();
+      historyRef.current.push({ role: 'assistant', content: reply });
+      push({ role: 'ai', text: reply });
+      await speak(reply);
+    } catch (e) {
+      setError(e.message || 'Error');
+      setStatus('error');
+      push({ role: 'system', text: 'Error: ' + (e.message || 'Error') });
+    }
+  }
+
+  useEffect(() => {
+    abortRef.current = false;
+    let rec, stream, analyser, dataArr;
+    async function start() {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+        mediaRef.current = stream;
+        const ctx = new AudioContext();
+        const source = ctx.createMediaStreamSource(stream);
+        analyser = ctx.createAnalyser();
+        analyser.fftSize = 512;
+        source.connect(analyser);
+        dataArr = new Uint8Array(analyser.frequencyBinCount);
+        const draw = () => {
+          analyser.getByteFrequencyData(dataArr);
+          let sum = 0;
+          for (let i = 0; i < dataArr.length; i++) sum += dataArr[i];
+          setMicLevel(sum / dataArr.length / 255);
+          const c = canvasRef.current;
+          if (c) {
+            const g = c.getContext('2d');
+            if (g) {
+              g.clearRect(0, 0, c.width, c.height);
+              g.fillStyle = '#e4a04a';
+              const bars = 24, w = c.width / bars;
+              for (let i = 0; i < bars; i++) {
+                const h = (dataArr[i * 4] / 255) * c.height * 0.9;
+                g.fillRect(i * w + 1, c.height - h, w - 2, h);
+              }
+            }
+          }
+          animRef.current = requestAnimationFrame(draw);
+        };
+        draw();
+        const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+        rec = new MediaRecorder(stream, { mimeType: mime });
+        recRef.current = rec;
+        chunksRef.current = [];
+        rec.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+        let silenceMs = 0, speaking = false;
+        const tick = () => {
+          if (abortRef.current) return;
+          analyser.getByteTimeDomainData(dataArr);
+          let sum = 0;
+          for (let i = 0; i < dataArr.length; i++) {
+            const v = (dataArr[i] - 128) / 128;
+            sum += v * v;
+          }
+          const rms = Math.sqrt(sum / dataArr.length);
+          if (rms > 0.04) {
+            silenceMs = 0;
+            if (!speaking) {
+              speaking = true;
+              chunksRef.current = [];
+              if (rec.state === 'inactive') rec.start(200);
+            }
+          } else if (speaking) {
+            silenceMs += 100;
+            if (silenceMs >= 900) {
+              speaking = false;
+              if (rec.state === 'recording') rec.stop();
+            }
+          }
+          setTimeout(tick, 100);
+        };
+        rec.onstop = async () => {
+          if (abortRef.current || analysingRef.current) return;
+          const blob = new Blob(chunksRef.current, { type: mime });
+          if (blob.size < 2000) {
+            if (rec.state === 'inactive') rec.start(200);
+            return;
+          }
+          analysingRef.current = true;
+          try {
+            setStatus('thinking');
+            const lang = profile.language === 'fa' ? 'fa' : profile.language === 'ar' ? 'ar' : undefined;
+            const text = await groqTranscribe(profile.apiKey, blob, lang);
+            if (text && text.length > 1) await chat(text);
+          } catch (e) {
+            setError(e.message || 'Transcription failed');
+            push({ role: 'system', text: e.message || 'Transcription failed' });
+          } finally {
+            analysingRef.current = false;
+            setStatus('listening');
+            if (!abortRef.current && rec.state === 'inactive') {
+              chunksRef.current = [];
+              rec.start(200);
+            }
+          }
+        };
+        setStatus('listening');
+        rec.start(200);
+        tick();
+        const greet = 'Hi ' + profile.userName + ', this is Nightline. I am here with you. What would you like to talk about?';
+        push({ role: 'ai', text: greet });
+        historyRef.current.push({ role: 'assistant', content: greet });
+        await speak(greet);
+        setStatus('listening');
+      } catch (e) {
+        setError(e.message || 'Mic denied');
+        setStatus('error');
+        push({ role: 'system', text: 'Mic error: ' + (e.message || 'denied') + '. You can still type below.' });
+      }
+    }
+    start();
+    return () => {
+      abortRef.current = true;
+      cancelAnimationFrame(animRef.current);
+      try { recRef.current && recRef.current.stop(); } catch {}
+      try { mediaRef.current && mediaRef.current.getTracks().forEach(t => t.stop()); } catch {}
+      speechSynthesis.cancel();
+    };
+  }, []);
+
+  async function sendTyped() {
+    const t = typed.trim();
+    if (!t) return;
+    setTyped('');
+    await chat(t);
+    setStatus('listening');
+  }
+
+  return (
+    <div className="flex-1 flex flex-col max-w-md mx-auto w-full min-h-full">
+      <div className="px-5 pt-6 pb-3 flex items-center justify-between border-b border-surface-2">
+        <div>
+          <p className="font-display text-lg">Nightline</p>
+          <p className="text-xs text-muted capitalize">{status}</p>
+        </div>
+        <button onClick={onEnd} className="rounded-full bg-end text-white px-4 py-2 text-sm font-medium">End</button>
+      </div>
+      <div className="px-5 py-3">
+        <canvas ref={canvasRef} width={320} height={36} className="w-full h-9 rounded-lg bg-surface" />
+        <div className="mt-1 h-1 rounded-full bg-surface overflow-hidden">
+          <div className="h-full bg-accent transition-all duration-75" style={{ width: Math.min(100, micLevel * 300) + '%' }} />
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto px-5 py-2 space-y-3">
+        {lines.map((l, i) => (
+          <div key={i} className={
+            'rounded-2xl px-4 py-2.5 text-sm max-w-[85%] ' +
+            (l.role === 'user' ? 'ml-auto bg-accent/20' : l.role === 'ai' ? 'bg-surface border border-surface-2' : 'mx-auto text-center text-muted text-xs')
+          }>{l.text}</div>
+        ))}
+      </div>
+      {error && <div className="mx-5 mb-2 rounded-xl bg-end/10 border border-end/30 px-3 py-2 text-xs text-end">{error}</div>}
+      <div className="px-5 pb-6 pt-2 flex gap-2">
+        <input className="flex-1 rounded-xl bg-surface border border-surface-2 px-4 py-3 text-sm outline-none"
+          placeholder="Type if mic unavailable…" value={typed}
+          onChange={e => setTyped(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && sendTyped()} />
+        <button onClick={sendTyped} className="rounded-xl bg-accent text-bg px-4 font-medium text-sm">Send</button>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [profile, setProfile] = useState(null);
+  const [phase, setPhase] = useState('setup');
+  const [booted, setBooted] = useState(false);
+  useEffect(() => {
+    const p = loadProfile();
+    if (p) { setProfile(p); setPhase('ready'); }
+    setBooted(true);
+  }, []);
+  if (!booted) return <div className="min-h-full flex items-center justify-center"><div className="text-muted text-sm">Loading…</div></div>;
+  return (
+    <div className="min-h-full flex flex-col bg-bg text-fg">
+      {phase === 'setup' && <Setup initial={profile} onSave={p => { saveProfile(p); setProfile(p); setPhase('ready'); }} />}
+      {phase === 'ready' && profile && <Ready profile={profile} onCall={() => setPhase('ringing')} onEdit={() => setPhase('setup')} />}
+      {phase === 'ringing' && profile && <Ringing profile={profile} onAnswer={() => setPhase('live')} onDecline={() => setPhase('ready')} />}
+      {phase === 'live' && profile && <Live profile={profile} onEnd={() => setPhase('ready')} />}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
