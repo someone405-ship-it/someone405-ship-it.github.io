@@ -4,301 +4,252 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#0c0a09" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src https://api.groq.com; media-src 'self' blob:;" />
-  <title>Nightline — AI Phone Companion</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <title>Nightline v4</title>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            bg: '#0c0a09', surface: '#1c1917', 'surface-2': '#292524',
-            fg: '#fafaf9', muted: '#a8a29e', accent: '#e4a04a',
-            'accent-dim': '#c4853a', end: '#c4493a', ok: '#4ade80',
-          },
-          fontFamily: {
-            display: ['Fraunces', 'serif'],
-            sans: ['Inter', 'system-ui', 'sans-serif'],
-          },
-        },
-      },
-    }
+    tailwind.config = { theme: { extend: {
+      colors: { bg:'#0c0a09', surface:'#1c1917', 'surface-2':'#292524', fg:'#fafaf9', muted:'#a8a29e', accent:'#e4a04a', 'accent-dim':'#c4853a', end:'#c4493a', ok:'#4ade80' },
+      fontFamily: { display:['Fraunces','serif'], sans:['Inter','system-ui','sans-serif'] }
+    }}}
   </script>
-  <style>
-    html, body, #root { height: 100%; margin: 0; background: #0c0a09; color: #fafaf9; font-family: Inter, system-ui, sans-serif; }
-    .font-display { font-family: Fraunces, serif; }
-  </style>
+  <style>html,body,#root{height:100%;margin:0;background:#0c0a09;color:#fafaf9;font-family:Inter,system-ui,sans-serif}.font-display{font-family:Fraunces,serif}</style>
 </head>
 <body>
-  <div id="root"></div>
-  <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/@babel/standalone@7.26.0/babel.min.js"></script>
-  <script type="text/babel" data-presets="react">
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone@7.26.0/babel.min.js"></script>
+<script type="text/babel" data-presets="react">
 const { useState, useEffect, useRef, useCallback } = React;
 
-const PROFILE_KEY = 'nl.p.v2';
-const CHAT_MODEL = 'openai/gpt-oss-20b';
-const CHAT_FALLBACK = 'openai/gpt-oss-120b';
+const PROFILE_KEY = 'nl.p.v3';
+const CHAT_MODELS = [
+  'openai/gpt-oss-20b',
+  'openai/gpt-oss-120b',
+  'qwen/qwen3.8-27b',
+  'openai/gpt-oss-safeguard-20b',
+];
+let ACTIVE_MODEL = CHAT_MODELS[0];
+
 const COUNTRIES = [
-  { iso: 'US', name: 'United States', code: '1' },
-  { iso: 'GB', name: 'United Kingdom', code: '44' },
-  { iso: 'IR', name: 'Iran', code: '98' },
-  { iso: 'DE', name: 'Germany', code: '49' },
-  { iso: 'FR', name: 'France', code: '33' },
-  { iso: 'JP', name: 'Japan', code: '81' },
-  { iso: 'AE', name: 'United Arab Emirates', code: '971' },
-  { iso: 'SA', name: 'Saudi Arabia', code: '966' },
-  { iso: 'TR', name: 'Turkey', code: '90' },
-  { iso: 'IN', name: 'India', code: '91' },
-  { iso: 'PK', name: 'Pakistan', code: '92' },
-  { iso: 'CA', name: 'Canada', code: '1' },
-  { iso: 'AU', name: 'Australia', code: '61' },
-  { iso: 'BR', name: 'Brazil', code: '55' },
-  { iso: 'MX', name: 'Mexico', code: '52' },
-  { iso: 'IT', name: 'Italy', code: '39' },
-  { iso: 'ES', name: 'Spain', code: '34' },
-  { iso: 'NL', name: 'Netherlands', code: '31' },
-  { iso: 'SE', name: 'Sweden', code: '46' },
-  { iso: 'NO', name: 'Norway', code: '47' },
-  { iso: 'PL', name: 'Poland', code: '48' },
-  { iso: 'RU', name: 'Russia', code: '7' },
-  { iso: 'KR', name: 'South Korea', code: '82' },
-  { iso: 'CN', name: 'China', code: '86' },
-  { iso: 'EG', name: 'Egypt', code: '20' },
-  { iso: 'IQ', name: 'Iraq', code: '964' },
-  { iso: 'AF', name: 'Afghanistan', code: '93' },
-  { iso: 'NG', name: 'Nigeria', code: '234' },
-  { iso: 'ZA', name: 'South Africa', code: '27' },
-  { iso: 'AR', name: 'Argentina', code: '54' },
-].sort((a, b) => a.name.localeCompare(b.name));
+  {iso:'US',name:'United States',code:'1'},{iso:'GB',name:'United Kingdom',code:'44'},{iso:'IR',name:'Iran',code:'98'},
+  {iso:'DE',name:'Germany',code:'49'},{iso:'FR',name:'France',code:'33'},{iso:'JP',name:'Japan',code:'81'},
+  {iso:'AE',name:'United Arab Emirates',code:'971'},{iso:'SA',name:'Saudi Arabia',code:'966'},{iso:'TR',name:'Turkey',code:'90'},
+  {iso:'IN',name:'India',code:'91'},{iso:'PK',name:'Pakistan',code:'92'},{iso:'CA',name:'Canada',code:'1'},
+  {iso:'AU',name:'Australia',code:'61'},{iso:'BR',name:'Brazil',code:'55'},{iso:'MX',name:'Mexico',code:'52'},
+  {iso:'IT',name:'Italy',code:'39'},{iso:'ES',name:'Spain',code:'34'},{iso:'NL',name:'Netherlands',code:'31'},
+  {iso:'SE',name:'Sweden',code:'46'},{iso:'NO',name:'Norway',code:'47'},{iso:'PL',name:'Poland',code:'48'},
+  {iso:'RU',name:'Russia',code:'7'},{iso:'KR',name:'South Korea',code:'82'},{iso:'CN',name:'China',code:'86'},
+  {iso:'EG',name:'Egypt',code:'20'},{iso:'IQ',name:'Iraq',code:'964'},{iso:'AF',name:'Afghanistan',code:'93'},
+  {iso:'NG',name:'Nigeria',code:'234'},{iso:'ZA',name:'South Africa',code:'27'},{iso:'AR',name:'Argentina',code:'54'},
+].sort((a,b)=>a.name.localeCompare(b.name));
+const LANG_BY = {IR:'fa',AF:'fa',SA:'ar',AE:'ar',EG:'ar',IQ:'ar',US:'en',GB:'en',DE:'de',FR:'fr',JP:'ja',PK:'ur',TR:'tr',RU:'ru'};
 
-const LANG_BY = { IR: 'fa', AF: 'fa', SA: 'ar', AE: 'ar', EG: 'ar', IQ: 'ar', US: 'en', GB: 'en', DE: 'de', FR: 'fr', JP: 'ja', PK: 'ur', TR: 'tr', RU: 'ru' };
+function seal(s){try{const k=0x5a;const b=Array.from(new TextEncoder().encode(s)).map(x=>x^k);return btoa(String.fromCharCode.apply(null,b));}catch{return '';}}
+function unseal(s){try{const k=0x5a;const r=atob(s);const b=Array.from(r).map(c=>c.charCodeAt(0)^k);return new TextDecoder().decode(new Uint8Array(b));}catch{return '';}}
+function maskKey(k){if(!k||k.length<12)return '••••';return k.slice(0,6)+'…'+k.slice(-4);}
 
-function seal(s) {
-  try {
-    const k = 0x5a;
-    const bytes = Array.from(new TextEncoder().encode(s)).map(b => b ^ k);
-    return btoa(String.fromCharCode.apply(null, bytes));
-  } catch { return ''; }
-}
-function unseal(s) {
-  try {
-    const k = 0x5a;
-    const raw = atob(s);
-    const bytes = Array.from(raw).map(c => c.charCodeAt(0) ^ k);
-    return new TextDecoder().decode(new Uint8Array(bytes));
-  } catch { return ''; }
-}
-
-function loadProfile() {
-  try {
-    const raw = sessionStorage.getItem(PROFILE_KEY) || localStorage.getItem(PROFILE_KEY);
-    if (!raw) return null;
-    const p = JSON.parse(raw);
-    if (p && p.k) p.apiKey = unseal(p.k);
-    if (p && p.apiKey && p.e164) return p;
-  } catch {}
+function loadProfile(){
+  try{
+    for (const key of [PROFILE_KEY, 'nl.p.v2', 'nightline.profile.v1']) {
+      const raw = sessionStorage.getItem(key) || localStorage.getItem(key);
+      if (!raw) continue;
+      const p = JSON.parse(raw);
+      if (p && p.k) p.apiKey = unseal(p.k);
+      if (p && p.apiKey && p.e164) {
+        if (p.model) ACTIVE_MODEL = p.model;
+        return p;
+      }
+    }
+  }catch{}
   return null;
 }
-function saveProfile(p) {
-  const store = {
-    userName: p.userName,
-    country: p.country,
-    nationalNumber: p.nationalNumber,
-    e164: p.e164,
-    language: p.language,
-    k: seal(p.apiKey),
-  };
+function saveProfile(p){
+  const store={userName:p.userName,country:p.country,nationalNumber:p.nationalNumber,e164:p.e164,language:p.language,model:p.model||ACTIVE_MODEL,k:seal(p.apiKey)};
   sessionStorage.setItem(PROFILE_KEY, JSON.stringify(store));
   localStorage.setItem(PROFILE_KEY, JSON.stringify(store));
 }
-function clearProfile() {
-  sessionStorage.removeItem(PROFILE_KEY);
-  localStorage.removeItem(PROFILE_KEY);
-  localStorage.removeItem('nightline.profile.v1');
+function clearProfile(){
+  [PROFILE_KEY,'nl.p.v2','nightline.profile.v1'].forEach(k=>{sessionStorage.removeItem(k);localStorage.removeItem(k);});
 }
 
-function maskKey(k) {
-  if (!k || k.length < 12) return '••••';
-  return k.slice(0, 6) + '…' + k.slice(-4);
+function friendlyError(err){
+  const s=typeof err==='string'?err:(err&&err.message)||String(err);
+  try{const j=JSON.parse(s);if(j.error&&j.error.message){
+    const m=j.error.message;
+    if(/does not exist|do not have access/i.test(m)) return 'That model is blocked on your key — trying another…';
+    return m;
+  }}catch{}
+  if(/invalid_media|valid media/i.test(s)) return 'Could not hear that — hold mic and speak again.';
+  if(/401|invalid.*api|authentication|incorrect api/i.test(s)) return 'API key rejected. Check your Groq key.';
+  if(/429|rate/i.test(s)) return 'Rate limited — wait a moment.';
+  return s.replace(/gsk_[A-Za-z0-9]+/g,'[key]').slice(0,200);
 }
 
-function friendlyError(err) {
-  const s = typeof err === 'string' ? err : (err && err.message) || String(err);
-  try {
-    const j = JSON.parse(s);
-    if (j.error && j.error.message) {
-      const m = j.error.message;
-      if (/does not exist|do not have access/i.test(m)) return 'Model unavailable on your plan — retrying with another model.';
-      return m;
-    }
-  } catch {}
-  if (/invalid_media|valid media/i.test(s)) return 'Could not hear that — hold the mic and speak again.';
-  if (/401|invalid.*api|incorrect api|authentication/i.test(s)) return 'API key rejected. Check your Groq key in settings.';
-  if (/429|rate/i.test(s)) return 'Rate limited — wait a moment and try again.';
-  return s.replace(/gsk_[A-Za-z0-9]+/g, '[key]').slice(0, 180);
-}
-
-async function groqChat(apiKey, messages, model) {
-  const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: { Authorization: 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: model || CHAT_MODEL, messages, temperature: 0.7, max_tokens: 400 }),
+async function groqChatOnce(apiKey, messages, model){
+  const r=await fetch('https://api.groq.com/openai/v1/chat/completions',{
+    method:'POST',
+    headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json'},
+    body:JSON.stringify({model, messages, temperature:0.7, max_tokens:400}),
   });
-  if (!r.ok) throw new Error(await r.text());
+  if(!r.ok) throw new Error(await r.text());
   return r.json();
 }
 
-async function groqChatWithFallback(apiKey, messages) {
-  try {
-    return await groqChat(apiKey, messages, CHAT_MODEL);
-  } catch (e) {
-    const msg = String(e.message || e);
-    if (/does not exist|do not have access|model/i.test(msg)) {
-      return await groqChat(apiKey, messages, CHAT_FALLBACK);
-    }
-    throw e;
+async function discoverWorkingModel(apiKey){
+  let available=[];
+  try{
+    const r=await fetch('https://api.groq.com/openai/v1/models',{headers:{Authorization:'Bearer '+apiKey}});
+    if(r.ok){const d=await r.json();available=(d.data||[]).map(m=>m.id);}
+  }catch{}
+  const candidates = available.length
+    ? CHAT_MODELS.filter(id=>available.includes(id)).concat(CHAT_MODELS.filter(id=>!available.includes(id)))
+    : CHAT_MODELS.slice();
+  for (const id of available) {
+    if (!candidates.includes(id) && !/whisper|orpheus|guard|tts|prompt/i.test(id)) candidates.push(id);
   }
+  let lastErr=null;
+  const probe=[{role:'user',content:'Reply with OK only.'}];
+  for (const model of candidates) {
+    try {
+      await groqChatOnce(apiKey, probe, model);
+      ACTIVE_MODEL = model;
+      return model;
+    } catch(e) {
+      lastErr=e;
+      const msg=String(e.message||e);
+      if(/401|invalid.*api|authentication|incorrect api/i.test(msg)) throw e;
+    }
+  }
+  throw lastErr || new Error('No chat model available on this API key. Open console.groq.com and check which models your key can use.');
 }
 
-async function groqTranscribe(apiKey, blob, language) {
-  if (!blob || blob.size < 4000) throw new Error('Recording too short — hold the button and speak longer.');
-  const form = new FormData();
-  const type = blob.type || 'audio/webm';
-  let name = 'audio.webm';
-  if (type.includes('ogg')) name = 'audio.ogg';
-  else if (type.includes('mp4') || type.includes('m4a')) name = 'audio.m4a';
-  else if (type.includes('wav')) name = 'audio.wav';
+async function groqChatWithFallback(apiKey, messages){
+  const order=[ACTIVE_MODEL, ...CHAT_MODELS.filter(m=>m!==ACTIVE_MODEL)];
+  let lastErr=null;
+  for (const model of order) {
+    try {
+      const data=await groqChatOnce(apiKey, messages, model);
+      ACTIVE_MODEL=model;
+      return data;
+    } catch(e) {
+      lastErr=e;
+      const msg=String(e.message||e);
+      if(/401|invalid.*api|authentication|incorrect api/i.test(msg)) throw e;
+    }
+  }
+  try {
+    const m=await discoverWorkingModel(apiKey);
+    return await groqChatOnce(apiKey, messages, m);
+  } catch(e) { throw lastErr || e; }
+}
+
+async function groqTranscribe(apiKey, blob, language){
+  if(!blob||blob.size<4000) throw new Error('Recording too short — hold the button and speak longer.');
+  const form=new FormData();
+  const type=blob.type||'audio/webm';
+  let name='audio.webm';
+  if(type.includes('ogg')) name='audio.ogg';
+  else if(type.includes('mp4')||type.includes('m4a')) name='audio.m4a';
   form.append('file', blob, name);
-  form.append('model', 'whisper-large-v3-turbo');
-  if (language) form.append('language', language);
-  form.append('response_format', 'json');
-  form.append('temperature', '0');
-  const r = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-    method: 'POST',
-    headers: { Authorization: 'Bearer ' + apiKey },
-    body: form,
+  form.append('model','whisper-large-v3-turbo');
+  if(language) form.append('language', language);
+  form.append('response_format','json');
+  const r=await fetch('https://api.groq.com/openai/v1/audio/transcriptions',{
+    method:'POST', headers:{Authorization:'Bearer '+apiKey}, body:form,
   });
-  if (!r.ok) throw new Error(await r.text());
-  const d = await r.json();
-  return (d.text || '').trim();
+  if(!r.ok) throw new Error(await r.text());
+  const d=await r.json();
+  return (d.text||'').trim();
 }
 
-async function groqSpeech(apiKey, text) {
-  const r = await fetch('https://api.groq.com/openai/v1/audio/speech', {
-    method: 'POST',
-    headers: { Authorization: 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'canopylabs/orpheus-v1-english',
-      voice: 'troy',
-      input: text.slice(0, 200),
-      response_format: 'wav',
-    }),
-  });
-  if (!r.ok) throw new Error(await r.text());
-  return r.blob();
-}
-
-function speakDevice(text, lang) {
-  return new Promise((resolve) => {
-    if (!window.speechSynthesis) return resolve();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = lang === 'fa' ? 'fa-IR' : lang === 'ar' ? 'ar-SA' : lang === 'ur' ? 'ur-PK' : 'en-US';
-    u.onend = () => resolve();
-    u.onerror = () => resolve();
-    speechSynthesis.cancel();
-    speechSynthesis.speak(u);
+function speakDevice(text, lang){
+  return new Promise(resolve=>{
+    if(!window.speechSynthesis) return resolve();
+    const u=new SpeechSynthesisUtterance(text);
+    u.lang=lang==='fa'?'fa-IR':lang==='ar'?'ar-SA':lang==='ur'?'ur-PK':'en-US';
+    u.onend=()=>resolve(); u.onerror=()=>resolve();
+    speechSynthesis.cancel(); speechSynthesis.speak(u);
   });
 }
 
-function pickRecorderMime() {
-  const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
-  for (const t of candidates) {
+function pickRecorderMime(){
+  for (const t of ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4']) {
     if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
   }
   return '';
 }
 
-function Setup({ initial, onSave }) {
-  const [apiKey, setApiKey] = useState(initial?.apiKey || '');
-  const [userName, setUserName] = useState(initial?.userName || '');
-  const [iso, setIso] = useState(initial?.country || 'US');
-  const [national, setNational] = useState(initial?.nationalNumber || '');
-  const [showKey, setShowKey] = useState(false);
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState('');
-  const [error, setError] = useState('');
-  const country = COUNTRIES.find(c => c.iso === iso) || COUNTRIES[0];
-  const filtered = COUNTRIES.filter(c =>
-    !search || c.name.toLowerCase().includes(search.toLowerCase()) ||
-    c.iso.toLowerCase().includes(search.toLowerCase()) || c.code.includes(search)
-  );
-  function handleSave() {
+function Setup({initial, onSave}){
+  const [apiKey,setApiKey]=useState(initial?.apiKey||'');
+  const [userName,setUserName]=useState(initial?.userName||'');
+  const [iso,setIso]=useState(initial?.country||'US');
+  const [national,setNational]=useState(initial?.nationalNumber||'');
+  const [showKey,setShowKey]=useState(false);
+  const [open,setOpen]=useState(false);
+  const [search,setSearch]=useState('');
+  const [error,setError]=useState('');
+  const [saving,setSaving]=useState(false);
+  const country=COUNTRIES.find(c=>c.iso===iso)||COUNTRIES[0];
+  const filtered=COUNTRIES.filter(c=>!search||c.name.toLowerCase().includes(search.toLowerCase())||c.iso.toLowerCase().includes(search.toLowerCase())||c.code.includes(search));
+
+  async function handleSave(){
     setError('');
-    const key = apiKey.trim();
-    if (!key.startsWith('gsk_') || key.length < 20) {
-      setError('Paste a valid Groq API key (starts with gsk_)');
-      return;
-    }
-    const digits = national.replace(/\D/g, '');
-    if (digits.length < 6) {
-      setError('Enter a phone number');
-      return;
-    }
-    onSave({
-      apiKey: key,
-      userName: userName.trim() || 'Friend',
-      country: country.iso,
-      nationalNumber: digits,
-      e164: '+' + country.code + digits,
-      language: LANG_BY[country.iso] || 'en',
-    });
+    const key=apiKey.trim();
+    if(!key.startsWith('gsk_')||key.length<20){setError('Paste a valid Groq API key (starts with gsk_)');return;}
+    const digits=national.replace(/\D/g,'');
+    if(digits.length<6){setError('Enter a phone number');return;}
+    setSaving(true);
+    try{
+      const model=await discoverWorkingModel(key);
+      onSave({apiKey:key,userName:userName.trim()||'Friend',country:country.iso,nationalNumber:digits,e164:'+'+country.code+digits,language:LANG_BY[country.iso]||'en',model});
+    }catch(e){setError(friendlyError(e));}
+    finally{setSaving(false);}
   }
+
   return (
     <div className="flex-1 flex flex-col max-w-md mx-auto w-full px-5 py-8 min-h-full">
       <header className="mb-8">
-        <p className="text-accent text-xs font-medium tracking-widest uppercase mb-2">Nightline</p>
-        <h1 className="font-display text-3xl font-semibold leading-tight">Your AI phone line</h1>
-        <p className="text-muted mt-2 text-sm leading-relaxed">Paste a Groq key, add your number (Iran +98 included), then press Call Me.</p>
+        <p className="text-accent text-xs font-medium tracking-widest uppercase mb-2">Nightline v4</p>
+        <h1 className="font-display text-3xl font-semibold">Your AI phone line</h1>
+        <p className="text-muted mt-2 text-sm">Paste Groq key — we auto-pick a model that works on your plan.</p>
       </header>
       <div className="space-y-5 flex-1">
         <label className="block">
           <span className="text-xs text-muted uppercase tracking-wide">Your name</span>
-          <input className="mt-1.5 w-full rounded-xl bg-surface border border-surface-2 px-4 py-3 outline-none focus:border-accent" value={userName} onChange={e => setUserName(e.target.value)} placeholder="How should the AI address you?" autoComplete="name" />
+          <input className="mt-1.5 w-full rounded-xl bg-surface border border-surface-2 px-4 py-3 outline-none focus:border-accent" value={userName} onChange={e=>setUserName(e.target.value)} placeholder="How should the AI address you?" />
         </label>
         <label className="block">
           <span className="text-xs text-muted uppercase tracking-wide">Groq API key</span>
           <div className="mt-1.5 relative">
-            <input type={showKey ? 'text' : 'password'} className="w-full rounded-xl bg-surface border border-surface-2 px-4 py-3 pr-20 outline-none focus:border-accent font-mono text-sm" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="gsk_…" autoComplete="off" spellCheck="false" />
-            <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted" onClick={() => setShowKey(v => !v)}>{showKey ? 'Hide' : 'Show'}</button>
+            <input type={showKey?'text':'password'} className="w-full rounded-xl bg-surface border border-surface-2 px-4 py-3 pr-20 outline-none focus:border-accent font-mono text-sm" value={apiKey} onChange={e=>setApiKey(e.target.value)} placeholder="gsk_…" autoComplete="off" spellCheck="false" />
+            <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted" onClick={()=>setShowKey(v=>!v)}>{showKey?'Hide':'Show'}</button>
           </div>
-          <p className="mt-1.5 text-xs text-muted">Stored only on this device (obfuscated). Sent only to api.groq.com. Create a key with limits in the Groq console.</p>
+          <p className="mt-1.5 text-xs text-muted">Key stays on this device. Only sent to api.groq.com.</p>
         </label>
         <div>
           <span className="text-xs text-muted uppercase tracking-wide">Phone number</span>
           <div className="mt-1.5 flex gap-2">
-            <button type="button" onClick={() => setOpen(true)} className="shrink-0 rounded-xl bg-surface border border-surface-2 px-3 py-3 text-sm font-medium min-w-[5.5rem]">+{country.code}</button>
-            <input className="flex-1 rounded-xl bg-surface border border-surface-2 px-4 py-3 outline-none focus:border-accent" value={national} onChange={e => setNational(e.target.value)} placeholder="phone number" inputMode="tel" />
+            <button type="button" onClick={()=>setOpen(true)} className="shrink-0 rounded-xl bg-surface border border-surface-2 px-3 py-3 text-sm font-medium min-w-[5.5rem]">+{country.code}</button>
+            <input className="flex-1 rounded-xl bg-surface border border-surface-2 px-4 py-3 outline-none focus:border-accent" value={national} onChange={e=>setNational(e.target.value)} placeholder="phone number" inputMode="tel" />
           </div>
         </div>
       </div>
       {error && <div className="mt-4 rounded-xl bg-end/10 border border-end/30 px-4 py-3 text-sm text-end">{error}</div>}
-      <button onClick={handleSave} className="mt-6 w-full rounded-2xl bg-accent text-bg font-semibold py-4 text-base">Save line</button>
+      <button onClick={handleSave} disabled={saving} className="mt-6 w-full rounded-2xl bg-accent text-bg font-semibold py-4 text-base disabled:opacity-60">{saving?'Testing key & finding model…':'Save line'}</button>
       {open && (
         <div className="fixed inset-0 z-50 bg-bg/90 backdrop-blur-sm flex flex-col">
           <div className="max-w-md mx-auto w-full flex flex-col h-full px-4 pt-6 pb-8">
             <div className="flex items-center gap-3 mb-4">
-              <input autoFocus className="flex-1 rounded-xl bg-surface border border-surface-2 px-4 py-3 outline-none" placeholder="Search country…" value={search} onChange={e => setSearch(e.target.value)} />
-              <button className="text-muted px-2" onClick={() => { setOpen(false); setSearch(''); }}>Close</button>
+              <input autoFocus className="flex-1 rounded-xl bg-surface border border-surface-2 px-4 py-3 outline-none" placeholder="Search country…" value={search} onChange={e=>setSearch(e.target.value)} />
+              <button className="text-muted px-2" onClick={()=>{setOpen(false);setSearch('');}}>Close</button>
             </div>
             <div className="flex-1 overflow-y-auto rounded-xl bg-surface border border-surface-2">
-              {filtered.map(c => (
-                <button key={c.iso} className={'w-full text-left px-4 py-3 flex justify-between border-b border-surface-2 ' + (c.iso === iso ? 'bg-accent/10' : '')} onClick={() => { setIso(c.iso); setOpen(false); setSearch(''); }}>
-                  <span className="font-medium">{c.name}</span>
-                  <span className="text-muted text-sm">+{c.code}</span>
+              {filtered.map(c=>(
+                <button key={c.iso} className={'w-full text-left px-4 py-3 flex justify-between border-b border-surface-2 '+(c.iso===iso?'bg-accent/10':'')} onClick={()=>{setIso(c.iso);setOpen(false);setSearch('');}}>
+                  <span className="font-medium">{c.name}</span><span className="text-muted text-sm">+{c.code}</span>
                 </button>
               ))}
             </div>
@@ -309,11 +260,11 @@ function Setup({ initial, onSave }) {
   );
 }
 
-function Ready({ profile, onCall, onEdit, onClear }) {
+function Ready({profile, onCall, onEdit, onClear}){
   return (
     <div className="flex-1 flex flex-col max-w-md mx-auto w-full px-5 py-10 min-h-full">
       <header className="mb-10">
-        <p className="text-accent text-xs font-medium tracking-widest uppercase mb-2">Nightline</p>
+        <p className="text-accent text-xs font-medium tracking-widest uppercase mb-2">Nightline v4</p>
         <h1 className="font-display text-3xl font-semibold">Ready to call</h1>
       </header>
       <div className="rounded-2xl bg-surface border border-surface-2 p-5 mb-8">
@@ -327,7 +278,7 @@ function Ready({ profile, onCall, onEdit, onClear }) {
         <p className="font-display text-xl font-medium">{profile.userName}</p>
         <p className="text-muted mt-1 text-sm">{profile.e164} · {profile.country}</p>
         <p className="text-muted mt-2 text-xs">Key: <span className="font-mono">{maskKey(profile.apiKey)}</span></p>
-        <p className="text-muted mt-1 text-xs">Model: openai/gpt-oss-20b</p>
+        <p className="text-muted mt-1 text-xs">Model: <span className="text-ok">{profile.model || ACTIVE_MODEL}</span></p>
       </div>
       <div className="flex-1 flex flex-col items-center justify-center">
         <button onClick={onCall} className="w-40 h-40 rounded-full bg-accent text-bg font-display text-xl font-semibold shadow-[0_0_60px_rgba(228,160,74,0.35)]">Call Me</button>
@@ -337,253 +288,169 @@ function Ready({ profile, onCall, onEdit, onClear }) {
   );
 }
 
-function Ringing({ profile, onAnswer, onDecline }) {
-  useEffect(() => {
-    let ctx, osc, interval;
-    try {
-      ctx = new AudioContext();
-      osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine'; osc.frequency.value = 440; gain.gain.value = 0.08;
-      osc.connect(gain); gain.connect(ctx.destination); osc.start();
-      let up = true;
-      interval = setInterval(() => {
-        gain.gain.setTargetAtTime(up ? 0.12 : 0.02, ctx.currentTime, 0.05);
-        up = !up;
-      }, 400);
-    } catch {}
-    return () => {
-      clearInterval(interval);
-      try { osc && osc.stop(); ctx && ctx.close(); } catch {}
-    };
-  }, []);
+function Ringing({profile, onAnswer, onDecline}){
+  useEffect(()=>{
+    let ctx,osc,interval;
+    try{
+      ctx=new AudioContext(); osc=ctx.createOscillator(); const gain=ctx.createGain();
+      osc.type='sine'; osc.frequency.value=440; gain.gain.value=0.08; osc.connect(gain); gain.connect(ctx.destination); osc.start();
+      let up=true; interval=setInterval(()=>{gain.gain.setTargetAtTime(up?0.12:0.02,ctx.currentTime,0.05);up=!up;},400);
+    }catch{}
+    return ()=>{clearInterval(interval);try{osc&&osc.stop();ctx&&ctx.close();}catch{}};
+  },[]);
   return (
     <div className="flex-1 flex flex-col items-center justify-between max-w-md mx-auto w-full px-5 py-16 min-h-full">
       <div className="text-center pt-8">
         <p className="text-muted text-sm mb-2">Incoming call</p>
         <div className="w-24 h-24 rounded-full bg-accent/20 flex items-center justify-center mx-auto mb-5 animate-pulse">
-          <div className="w-16 h-16 rounded-full bg-accent/40 flex items-center justify-center">
-            <span className="font-display text-2xl text-accent">AI</span>
-          </div>
+          <div className="w-16 h-16 rounded-full bg-accent/40 flex items-center justify-center"><span className="font-display text-2xl text-accent">AI</span></div>
         </div>
         <h1 className="font-display text-2xl font-semibold">Nightline</h1>
         <p className="text-muted mt-1 text-sm">Calling {profile.userName}</p>
       </div>
       <div className="flex gap-10 pb-10">
-        <button onClick={onDecline} className="flex flex-col items-center gap-2">
-          <span className="w-16 h-16 rounded-full bg-end flex items-center justify-center text-white text-2xl">✕</span>
-          <span className="text-xs text-muted">Decline</span>
-        </button>
-        <button onClick={onAnswer} className="flex flex-col items-center gap-2">
-          <span className="w-16 h-16 rounded-full bg-ok flex items-center justify-center text-bg text-2xl">✓</span>
-          <span className="text-xs text-muted">Answer</span>
-        </button>
+        <button onClick={onDecline} className="flex flex-col items-center gap-2"><span className="w-16 h-16 rounded-full bg-end flex items-center justify-center text-white text-2xl">✕</span><span className="text-xs text-muted">Decline</span></button>
+        <button onClick={onAnswer} className="flex flex-col items-center gap-2"><span className="w-16 h-16 rounded-full bg-ok flex items-center justify-center text-bg text-2xl">✓</span><span className="text-xs text-muted">Answer</span></button>
       </div>
     </div>
   );
 }
 
-function Live({ profile, onEnd }) {
-  const [lines, setLines] = useState([]);
-  const [status, setStatus] = useState('connecting');
-  const [error, setError] = useState('');
-  const [typed, setTyped] = useState('');
-  const [micLevel, setMicLevel] = useState(0);
-  const [holding, setHolding] = useState(false);
-  const historyRef = useRef([]);
-  const abortRef = useRef(false);
-  const mediaRef = useRef(null);
-  const recRef = useRef(null);
-  const chunksRef = useRef([]);
-  const busyRef = useRef(false);
-  const canvasRef = useRef(null);
-  const animRef = useRef(0);
-  const mimeRef = useRef('');
-  const holdStartRef = useRef(0);
-  const push = useCallback((line) => setLines(prev => [...prev, line]), []);
+function Live({profile, onEnd}){
+  const [lines,setLines]=useState([]);
+  const [status,setStatus]=useState('connecting');
+  const [error,setError]=useState('');
+  const [typed,setTyped]=useState('');
+  const [micLevel,setMicLevel]=useState(0);
+  const [holding,setHolding]=useState(false);
+  const historyRef=useRef([]);
+  const abortRef=useRef(false);
+  const mediaRef=useRef(null);
+  const recRef=useRef(null);
+  const chunksRef=useRef([]);
+  const busyRef=useRef(false);
+  const canvasRef=useRef(null);
+  const animRef=useRef(0);
+  const mimeRef=useRef('');
+  const holdStartRef=useRef(0);
+  const push=useCallback(line=>setLines(prev=>[...prev,line]),[]);
 
-  async function speak(text) {
-    if (abortRef.current) return;
+  async function speak(text){
+    if(abortRef.current) return;
     setStatus('speaking');
-    const lang = profile.language;
-    if (lang === 'en') {
-      try {
-        const blob = await groqSpeech(profile.apiKey, text);
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        await new Promise((res, rej) => { audio.onended = res; audio.onerror = rej; audio.play().catch(rej); });
-        URL.revokeObjectURL(url);
-        return;
-      } catch (e) { console.warn('tts', e && e.message); }
-    }
-    await speakDevice(text, lang);
+    await speakDevice(text, profile.language);
   }
 
-  async function chat(userText) {
-    if (!userText || busyRef.current) return;
-    busyRef.current = true;
-    setStatus('thinking');
-    setError('');
-    historyRef.current.push({ role: 'user', content: userText });
-    push({ role: 'user', text: userText });
-    try {
-      const data = await groqChatWithFallback(profile.apiKey, [
-        { role: 'system', content: 'You are Nightline, a warm personal AI phone companion speaking to ' + profile.userName + '. Keep replies short (1-3 sentences), conversational, and natural for voice. Identify as an AI when asked. Prefer language: ' + profile.language + '.' },
+  async function chat(userText){
+    if(!userText||busyRef.current) return;
+    busyRef.current=true;
+    setStatus('thinking'); setError('');
+    historyRef.current.push({role:'user',content:userText});
+    push({role:'user',text:userText});
+    try{
+      const data=await groqChatWithFallback(profile.apiKey,[
+        {role:'system',content:'You are Nightline, a warm personal AI phone companion speaking to '+profile.userName+'. Keep replies short (1-3 sentences), conversational, natural for voice. Identify as an AI when asked. Prefer language: '+profile.language+'.'},
         ...historyRef.current.slice(-12),
       ]);
-      const reply = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || 'Sorry, I lost that.').trim();
-      historyRef.current.push({ role: 'assistant', content: reply });
-      push({ role: 'ai', text: reply });
+      const reply=(data.choices&&data.choices[0]&&data.choices[0].message&&data.choices[0].message.content||'Sorry, I lost that.').trim();
+      historyRef.current.push({role:'assistant',content:reply});
+      push({role:'ai',text:reply});
       await speak(reply);
       setStatus('listening');
-    } catch (e) {
-      const msg = friendlyError(e);
-      setError(msg);
-      setStatus('error');
-      push({ role: 'system', text: msg });
-    } finally {
-      busyRef.current = false;
+    }catch(e){
+      const msg=friendlyError(e);
+      setError(msg); setStatus('error'); push({role:'system',text:msg});
+    }finally{busyRef.current=false;}
+  }
+
+  async function processRecording(){
+    if(busyRef.current||abortRef.current) return;
+    const chunks=chunksRef.current.slice(); chunksRef.current=[];
+    if(!chunks.length) return;
+    const blob=new Blob(chunks,{type:mimeRef.current||'audio/webm'});
+    if(blob.size<4000||Date.now()-holdStartRef.current<400){
+      setError('Hold the mic and speak for at least a second.'); setStatus('listening'); return;
+    }
+    busyRef.current=true; setStatus('thinking'); setError('');
+    try{
+      const lang=profile.language==='fa'?'fa':profile.language==='ar'?'ar':profile.language==='ur'?'ur':undefined;
+      const text=await groqTranscribe(profile.apiKey, blob, lang);
+      busyRef.current=false;
+      if(text&&text.length>0) await chat(text);
+      else { setError('Did not catch any words — try again.'); setStatus('listening'); }
+    }catch(e){
+      setError(friendlyError(e)); push({role:'system',text:friendlyError(e)}); setStatus('listening'); busyRef.current=false;
     }
   }
 
-  async function processRecording() {
-    if (busyRef.current || abortRef.current) return;
-    const chunks = chunksRef.current.slice();
-    chunksRef.current = [];
-    if (!chunks.length) return;
-    const mime = mimeRef.current || 'audio/webm';
-    const blob = new Blob(chunks, { type: mime });
-    const heldMs = Date.now() - holdStartRef.current;
-    if (blob.size < 4000 || heldMs < 400) {
-      setError('Hold the mic and speak for at least a second.');
-      setStatus('listening');
-      return;
-    }
-    busyRef.current = true;
-    setStatus('thinking');
-    setError('');
-    try {
-      const lang = profile.language === 'fa' ? 'fa' : profile.language === 'ar' ? 'ar' : profile.language === 'ur' ? 'ur' : undefined;
-      const text = await groqTranscribe(profile.apiKey, blob, lang);
-      busyRef.current = false;
-      if (text && text.length > 0) await chat(text);
-      else {
-        setError('Did not catch any words — try again.');
-        setStatus('listening');
-      }
-    } catch (e) {
-      setError(friendlyError(e));
-      push({ role: 'system', text: friendlyError(e) });
-      setStatus('listening');
-      busyRef.current = false;
-    }
-  }
-
-  function startHold(e) {
-    if (e && e.preventDefault) e.preventDefault();
-    if (busyRef.current || abortRef.current) return;
-    if (!mediaRef.current) {
-      setError('Mic not ready yet — wait a second.');
-      return;
-    }
-    speechSynthesis.cancel();
-    chunksRef.current = [];
-    holdStartRef.current = Date.now();
-    setHolding(true);
-    setError('');
-    setStatus('recording');
-    try {
-      const stream = mediaRef.current;
-      const mime = mimeRef.current;
-      const rec = mime
-        ? new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 128000 })
-        : new MediaRecorder(stream);
-      recRef.current = rec;
-      chunksRef.current = [];
-      rec.ondataavailable = (ev) => { if (ev.data && ev.data.size > 0) chunksRef.current.push(ev.data); };
-      rec.onstop = () => { processRecording(); };
+  function startHold(e){
+    if(e&&e.preventDefault) e.preventDefault();
+    if(busyRef.current||abortRef.current) return;
+    if(!mediaRef.current){setError('Mic not ready yet');return;}
+    speechSynthesis.cancel(); chunksRef.current=[]; holdStartRef.current=Date.now();
+    setHolding(true); setError(''); setStatus('recording');
+    try{
+      const mime=mimeRef.current;
+      const rec=mime?new MediaRecorder(mediaRef.current,{mimeType:mime,audioBitsPerSecond:128000}):new MediaRecorder(mediaRef.current);
+      recRef.current=rec; chunksRef.current=[];
+      rec.ondataavailable=ev=>{if(ev.data&&ev.data.size>0) chunksRef.current.push(ev.data);};
+      rec.onstop=()=>processRecording();
       rec.start(100);
-    } catch (err) {
-      setError('Could not start mic');
-      setHolding(false);
-      setStatus('listening');
-    }
+    }catch{setError('Could not start mic');setHolding(false);setStatus('listening');}
   }
-
-  function endHold(e) {
-    if (e && e.preventDefault) e.preventDefault();
+  function endHold(e){
+    if(e&&e.preventDefault) e.preventDefault();
     setHolding(false);
-    try {
-      if (recRef.current && recRef.current.state === 'recording') recRef.current.stop();
-      else if (chunksRef.current.length) processRecording();
+    try{
+      if(recRef.current&&recRef.current.state==='recording') recRef.current.stop();
+      else if(chunksRef.current.length) processRecording();
       else setStatus('listening');
-    } catch { processRecording(); }
+    }catch{processRecording();}
   }
 
-  useEffect(() => {
-    abortRef.current = false;
-    let stream, analyser, dataArr;
-    async function start() {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        });
-        mediaRef.current = stream;
-        const ctx = new AudioContext();
-        const source = ctx.createMediaStreamSource(stream);
-        analyser = ctx.createAnalyser();
-        analyser.fftSize = 256;
-        source.connect(analyser);
-        dataArr = new Uint8Array(analyser.frequencyBinCount);
-        const draw = () => {
+  useEffect(()=>{
+    abortRef.current=false;
+    let stream,analyser,dataArr;
+    async function start(){
+      if(profile.model) ACTIVE_MODEL=profile.model;
+      try{
+        stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+        mediaRef.current=stream;
+        const ctx=new AudioContext(); const source=ctx.createMediaStreamSource(stream);
+        analyser=ctx.createAnalyser(); analyser.fftSize=256; source.connect(analyser);
+        dataArr=new Uint8Array(analyser.frequencyBinCount);
+        const draw=()=>{
           analyser.getByteFrequencyData(dataArr);
-          let sum = 0;
-          for (let i = 0; i < dataArr.length; i++) sum += dataArr[i];
-          setMicLevel(sum / dataArr.length / 255);
-          const c = canvasRef.current;
-          if (c) {
-            const g = c.getContext('2d');
-            if (g) {
-              g.clearRect(0, 0, c.width, c.height);
-              g.fillStyle = '#e4a04a';
-              const bars = 24, w = c.width / bars;
-              for (let i = 0; i < bars; i++) {
-                const h = (dataArr[Math.floor(i * dataArr.length / bars)] / 255) * c.height * 0.9;
-                g.fillRect(i * w + 1, c.height - h, w - 2, h);
-              }
-            }
-          }
-          animRef.current = requestAnimationFrame(draw);
+          let sum=0; for(let i=0;i<dataArr.length;i++) sum+=dataArr[i];
+          setMicLevel(sum/dataArr.length/255);
+          const c=canvasRef.current;
+          if(c){const g=c.getContext('2d'); if(g){g.clearRect(0,0,c.width,c.height);g.fillStyle='#e4a04a';const bars=24,w=c.width/bars;for(let i=0;i<bars;i++){const h=(dataArr[Math.floor(i*dataArr.length/bars)]/255)*c.height*0.9;g.fillRect(i*w+1,c.height-h,w-2,h);}}}
+          animRef.current=requestAnimationFrame(draw);
         };
         draw();
-        mimeRef.current = pickRecorderMime();
+        mimeRef.current=pickRecorderMime();
         setStatus('listening');
-        const greet = 'Hi ' + profile.userName + ', this is Nightline. I am here with you. What would you like to talk about?';
-        push({ role: 'ai', text: greet });
-        historyRef.current.push({ role: 'assistant', content: greet });
+        const greet='Hi '+profile.userName+', this is Nightline. I am here with you. What would you like to talk about?';
+        push({role:'ai',text:greet});
+        historyRef.current.push({role:'assistant',content:greet});
         await speak(greet);
         setStatus('listening');
-      } catch (e) {
-        setError('Mic unavailable — you can still type.');
-        setStatus('error');
-        push({ role: 'system', text: 'Mic unavailable. Type your messages below.' });
+      }catch{
+        setError('Mic unavailable — you can still type.'); setStatus('error');
+        push({role:'system',text:'Mic unavailable. Type your messages below.'});
       }
     }
     start();
-    return () => {
-      abortRef.current = true;
-      cancelAnimationFrame(animRef.current);
-      try { if (recRef.current && recRef.current.state === 'recording') recRef.current.stop(); } catch {}
-      try { mediaRef.current && mediaRef.current.getTracks().forEach(t => t.stop()); } catch {}
+    return ()=>{
+      abortRef.current=true; cancelAnimationFrame(animRef.current);
+      try{if(recRef.current&&recRef.current.state==='recording')recRef.current.stop();}catch{}
+      try{mediaRef.current&&mediaRef.current.getTracks().forEach(t=>t.stop());}catch{}
       speechSynthesis.cancel();
     };
-  }, []);
+  },[]);
 
-  async function sendTyped() {
-    const t = typed.trim();
-    if (!t || busyRef.current) return;
-    setTyped('');
-    await chat(t);
+  async function sendTyped(){
+    const t=typed.trim(); if(!t||busyRef.current) return; setTyped(''); await chat(t);
   }
 
   return (
@@ -591,34 +458,28 @@ function Live({ profile, onEnd }) {
       <div className="px-5 pt-6 pb-3 flex items-center justify-between border-b border-surface-2">
         <div>
           <p className="font-display text-lg">Nightline</p>
-          <p className="text-xs text-muted capitalize">{status === 'recording' ? 'listening… hold to speak' : status}</p>
+          <p className="text-xs text-muted">{status==='recording'?'listening… hold to speak':status} · {ACTIVE_MODEL.split('/').pop()}</p>
         </div>
         <button onClick={onEnd} className="rounded-full bg-end text-white px-4 py-2 text-sm font-medium">End</button>
       </div>
       <div className="px-5 py-3">
         <canvas ref={canvasRef} width={320} height={36} className="w-full h-9 rounded-lg bg-surface" />
-        <div className="mt-1 h-1 rounded-full bg-surface overflow-hidden">
-          <div className="h-full bg-accent transition-all duration-75" style={{ width: Math.min(100, micLevel * 300) + '%' }} />
-        </div>
+        <div className="mt-1 h-1 rounded-full bg-surface overflow-hidden"><div className="h-full bg-accent transition-all duration-75" style={{width:Math.min(100,micLevel*300)+'%'}} /></div>
       </div>
       <div className="flex-1 overflow-y-auto px-5 py-2 space-y-3">
-        {lines.map((l, i) => (
-          <div key={i} className={
-            'rounded-2xl px-4 py-2.5 text-sm max-w-[85%] ' +
-            (l.role === 'user' ? 'ml-auto bg-accent/20' : l.role === 'ai' ? 'bg-surface border border-surface-2' : 'mx-auto text-center text-muted text-xs')
-          }>{l.text}</div>
+        {lines.map((l,i)=>(
+          <div key={i} className={'rounded-2xl px-4 py-2.5 text-sm max-w-[85%] '+(l.role==='user'?'ml-auto bg-accent/20':l.role==='ai'?'bg-surface border border-surface-2':'mx-auto text-center text-muted text-xs')}>{l.text}</div>
         ))}
       </div>
       {error && <div className="mx-5 mb-2 rounded-xl bg-end/10 border border-end/30 px-3 py-2 text-xs text-end">{error}</div>}
       <div className="px-5 pb-4 pt-2 flex flex-col gap-3">
-        <button type="button"
-          className={'w-full rounded-2xl py-4 font-semibold text-base select-none ' + (holding ? 'bg-ok text-bg scale-[0.98]' : 'bg-accent text-bg')}
-          onMouseDown={startHold} onMouseUp={endHold} onMouseLeave={() => holding && endHold()}
+        <button type="button" className={'w-full rounded-2xl py-4 font-semibold text-base select-none '+(holding?'bg-ok text-bg scale-[0.98]':'bg-accent text-bg')}
+          onMouseDown={startHold} onMouseUp={endHold} onMouseLeave={()=>holding&&endHold()}
           onTouchStart={startHold} onTouchEnd={endHold} onTouchCancel={endHold}>
-          {holding ? 'Release to send…' : 'Hold to talk'}
+          {holding?'Release to send…':'Hold to talk'}
         </button>
         <div className="flex gap-2">
-          <input className="flex-1 rounded-xl bg-surface border border-surface-2 px-4 py-3 text-sm outline-none focus:border-accent" placeholder="Or type a message…" value={typed} onChange={e => setTyped(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendTyped()} />
+          <input className="flex-1 rounded-xl bg-surface border border-surface-2 px-4 py-3 text-sm outline-none focus:border-accent" placeholder="Or type a message…" value={typed} onChange={e=>setTyped(e.target.value)} onKeyDown={e=>e.key==='Enter'&&sendTyped()} />
           <button onClick={sendTyped} className="rounded-xl bg-surface-2 text-fg px-4 font-medium text-sm border border-surface-2">Send</button>
         </div>
       </div>
@@ -626,32 +487,28 @@ function Live({ profile, onEnd }) {
   );
 }
 
-function App() {
-  const [profile, setProfile] = useState(null);
-  const [phase, setPhase] = useState('setup');
-  const [booted, setBooted] = useState(false);
-  useEffect(() => {
-    const p = loadProfile();
-    if (p) { setProfile(p); setPhase('ready'); }
+function App(){
+  const [profile,setProfile]=useState(null);
+  const [phase,setPhase]=useState('setup');
+  const [booted,setBooted]=useState(false);
+  useEffect(()=>{
+    const p=loadProfile();
+    if(p){setProfile(p);setPhase('ready');}
     setBooted(true);
-  }, []);
-  function handleClear() {
-    clearProfile();
-    setProfile(null);
-    setPhase('setup');
-  }
-  if (!booted) return <div className="min-h-full flex items-center justify-center"><div className="text-muted text-sm">Loading…</div></div>;
+  },[]);
+  function handleClear(){clearProfile();setProfile(null);setPhase('setup');}
+  if(!booted) return <div className="min-h-full flex items-center justify-center"><div className="text-muted text-sm">Loading…</div></div>;
   return (
     <div className="min-h-full flex flex-col bg-bg text-fg">
-      {phase === 'setup' && <Setup initial={profile} onSave={p => { saveProfile(p); setProfile(p); setPhase('ready'); }} />}
-      {phase === 'ready' && profile && <Ready profile={profile} onCall={() => setPhase('ringing')} onEdit={() => setPhase('setup')} onClear={handleClear} />}
-      {phase === 'ringing' && profile && <Ringing profile={profile} onAnswer={() => setPhase('live')} onDecline={() => setPhase('ready')} />}
-      {phase === 'live' && profile && <Live profile={profile} onEnd={() => setPhase('ready')} />}
+      {phase==='setup' && <Setup initial={profile} onSave={p=>{saveProfile(p);setProfile(p);setPhase('ready');}} />}
+      {phase==='ready' && profile && <Ready profile={profile} onCall={()=>setPhase('ringing')} onEdit={()=>setPhase('setup')} onClear={handleClear} />}
+      {phase==='ringing' && profile && <Ringing profile={profile} onAnswer={()=>setPhase('live')} onDecline={()=>setPhase('ready')} />}
+      {phase==='live' && profile && <Live profile={profile} onEnd={()=>setPhase('ready')} />}
     </div>
   );
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App />);
-  </script>
+</script>
 </body>
 </html>
