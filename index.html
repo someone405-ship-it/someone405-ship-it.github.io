@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#0c0a09" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src https://api.groq.com; media-src 'self' blob:;" />
   <title>Nightline — AI Phone Companion</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -38,7 +39,9 @@
   <script type="text/babel" data-presets="react">
 const { useState, useEffect, useRef, useCallback } = React;
 
-const PROFILE_KEY = 'nightline.profile.v1';
+const PROFILE_KEY = 'nl.p.v2';
+const CHAT_MODEL = 'openai/gpt-oss-20b';
+const CHAT_FALLBACK = 'openai/gpt-oss-120b';
 const COUNTRIES = [
   { iso: 'US', name: 'United States', code: '1' },
   { iso: 'GB', name: 'United Kingdom', code: '44' },
@@ -74,34 +77,91 @@ const COUNTRIES = [
 
 const LANG_BY = { IR: 'fa', AF: 'fa', SA: 'ar', AE: 'ar', EG: 'ar', IQ: 'ar', US: 'en', GB: 'en', DE: 'de', FR: 'fr', JP: 'ja', PK: 'ur', TR: 'tr', RU: 'ru' };
 
+function seal(s) {
+  try {
+    const k = 0x5a;
+    const bytes = Array.from(new TextEncoder().encode(s)).map(b => b ^ k);
+    return btoa(String.fromCharCode.apply(null, bytes));
+  } catch { return ''; }
+}
+function unseal(s) {
+  try {
+    const k = 0x5a;
+    const raw = atob(s);
+    const bytes = Array.from(raw).map(c => c.charCodeAt(0) ^ k);
+    return new TextDecoder().decode(new Uint8Array(bytes));
+  } catch { return ''; }
+}
+
 function loadProfile() {
   try {
-    const p = JSON.parse(localStorage.getItem(PROFILE_KEY) || 'null');
-    return p && p.apiKey && p.e164 ? p : null;
-  } catch { return null; }
+    const raw = sessionStorage.getItem(PROFILE_KEY) || localStorage.getItem(PROFILE_KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw);
+    if (p && p.k) p.apiKey = unseal(p.k);
+    if (p && p.apiKey && p.e164) return p;
+  } catch {}
+  return null;
 }
-function saveProfile(p) { localStorage.setItem(PROFILE_KEY, JSON.stringify(p)); }
+function saveProfile(p) {
+  const store = {
+    userName: p.userName,
+    country: p.country,
+    nationalNumber: p.nationalNumber,
+    e164: p.e164,
+    language: p.language,
+    k: seal(p.apiKey),
+  };
+  sessionStorage.setItem(PROFILE_KEY, JSON.stringify(store));
+  localStorage.setItem(PROFILE_KEY, JSON.stringify(store));
+}
+function clearProfile() {
+  sessionStorage.removeItem(PROFILE_KEY);
+  localStorage.removeItem(PROFILE_KEY);
+  localStorage.removeItem('nightline.profile.v1');
+}
+
+function maskKey(k) {
+  if (!k || k.length < 12) return '••••';
+  return k.slice(0, 6) + '…' + k.slice(-4);
+}
 
 function friendlyError(err) {
   const s = typeof err === 'string' ? err : (err && err.message) || String(err);
   try {
     const j = JSON.parse(s);
-    if (j.error && j.error.message) return j.error.message;
+    if (j.error && j.error.message) {
+      const m = j.error.message;
+      if (/does not exist|do not have access/i.test(m)) return 'Model unavailable on your plan — retrying with another model.';
+      return m;
+    }
   } catch {}
-  if (/invalid_media|valid media/i.test(s)) return 'Could not hear that clearly — hold the mic button and speak again.';
-  if (/401|invalid.*api|incorrect api/i.test(s)) return 'API key rejected. Check your Groq key.';
+  if (/invalid_media|valid media/i.test(s)) return 'Could not hear that — hold the mic and speak again.';
+  if (/401|invalid.*api|incorrect api|authentication/i.test(s)) return 'API key rejected. Check your Groq key in settings.';
   if (/429|rate/i.test(s)) return 'Rate limited — wait a moment and try again.';
-  return s.slice(0, 180);
+  return s.replace(/gsk_[A-Za-z0-9]+/g, '[key]').slice(0, 180);
 }
 
-async function groqChat(apiKey, messages) {
+async function groqChat(apiKey, messages, model) {
   const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages, temperature: 0.7, max_tokens: 400 }),
+    body: JSON.stringify({ model: model || CHAT_MODEL, messages, temperature: 0.7, max_tokens: 400 }),
   });
   if (!r.ok) throw new Error(await r.text());
   return r.json();
+}
+
+async function groqChatWithFallback(apiKey, messages) {
+  try {
+    return await groqChat(apiKey, messages, CHAT_MODEL);
+  } catch (e) {
+    const msg = String(e.message || e);
+    if (/does not exist|do not have access|model/i.test(msg)) {
+      return await groqChat(apiKey, messages, CHAT_FALLBACK);
+    }
+    throw e;
+  }
 }
 
 async function groqTranscribe(apiKey, blob, language) {
@@ -112,7 +172,6 @@ async function groqTranscribe(apiKey, blob, language) {
   if (type.includes('ogg')) name = 'audio.ogg';
   else if (type.includes('mp4') || type.includes('m4a')) name = 'audio.m4a';
   else if (type.includes('wav')) name = 'audio.wav';
-  else if (type.includes('mpeg') || type.includes('mp3')) name = 'audio.mp3';
   form.append('file', blob, name);
   form.append('model', 'whisper-large-v3-turbo');
   if (language) form.append('language', language);
@@ -156,12 +215,7 @@ function speakDevice(text, lang) {
 }
 
 function pickRecorderMime() {
-  const candidates = [
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/ogg;codecs=opus',
-    'audio/mp4',
-  ];
+  const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
   for (const t of candidates) {
     if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
   }
@@ -184,11 +238,18 @@ function Setup({ initial, onSave }) {
   );
   function handleSave() {
     setError('');
-    if (!apiKey.trim().startsWith('gsk_')) { setError('Paste a valid Groq API key (starts with gsk_)'); return; }
+    const key = apiKey.trim();
+    if (!key.startsWith('gsk_') || key.length < 20) {
+      setError('Paste a valid Groq API key (starts with gsk_)');
+      return;
+    }
     const digits = national.replace(/\D/g, '');
-    if (digits.length < 6) { setError('Enter a phone number'); return; }
+    if (digits.length < 6) {
+      setError('Enter a phone number');
+      return;
+    }
     onSave({
-      apiKey: apiKey.trim(),
+      apiKey: key,
       userName: userName.trim() || 'Friend',
       country: country.iso,
       nationalNumber: digits,
@@ -206,14 +267,15 @@ function Setup({ initial, onSave }) {
       <div className="space-y-5 flex-1">
         <label className="block">
           <span className="text-xs text-muted uppercase tracking-wide">Your name</span>
-          <input className="mt-1.5 w-full rounded-xl bg-surface border border-surface-2 px-4 py-3 outline-none focus:border-accent" value={userName} onChange={e => setUserName(e.target.value)} placeholder="How should the AI address you?" />
+          <input className="mt-1.5 w-full rounded-xl bg-surface border border-surface-2 px-4 py-3 outline-none focus:border-accent" value={userName} onChange={e => setUserName(e.target.value)} placeholder="How should the AI address you?" autoComplete="name" />
         </label>
         <label className="block">
           <span className="text-xs text-muted uppercase tracking-wide">Groq API key</span>
           <div className="mt-1.5 relative">
-            <input type={showKey ? 'text' : 'password'} className="w-full rounded-xl bg-surface border border-surface-2 px-4 py-3 pr-20 outline-none focus:border-accent font-mono text-sm" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="gsk_…" autoComplete="off" />
+            <input type={showKey ? 'text' : 'password'} className="w-full rounded-xl bg-surface border border-surface-2 px-4 py-3 pr-20 outline-none focus:border-accent font-mono text-sm" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="gsk_…" autoComplete="off" spellCheck="false" />
             <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted" onClick={() => setShowKey(v => !v)}>{showKey ? 'Hide' : 'Show'}</button>
           </div>
+          <p className="mt-1.5 text-xs text-muted">Stored only on this device (obfuscated). Sent only to api.groq.com. Create a key with limits in the Groq console.</p>
         </label>
         <div>
           <span className="text-xs text-muted uppercase tracking-wide">Phone number</span>
@@ -221,7 +283,6 @@ function Setup({ initial, onSave }) {
             <button type="button" onClick={() => setOpen(true)} className="shrink-0 rounded-xl bg-surface border border-surface-2 px-3 py-3 text-sm font-medium min-w-[5.5rem]">+{country.code}</button>
             <input className="flex-1 rounded-xl bg-surface border border-surface-2 px-4 py-3 outline-none focus:border-accent" value={national} onChange={e => setNational(e.target.value)} placeholder="phone number" inputMode="tel" />
           </div>
-          <p className="mt-1 text-xs text-muted">Iran (+98) works for browser voice.</p>
         </div>
       </div>
       {error && <div className="mt-4 rounded-xl bg-end/10 border border-end/30 px-4 py-3 text-sm text-end">{error}</div>}
@@ -248,7 +309,7 @@ function Setup({ initial, onSave }) {
   );
 }
 
-function Ready({ profile, onCall, onEdit }) {
+function Ready({ profile, onCall, onEdit, onClear }) {
   return (
     <div className="flex-1 flex flex-col max-w-md mx-auto w-full px-5 py-10 min-h-full">
       <header className="mb-10">
@@ -258,11 +319,15 @@ function Ready({ profile, onCall, onEdit }) {
       <div className="rounded-2xl bg-surface border border-surface-2 p-5 mb-8">
         <div className="flex justify-between mb-4">
           <span className="text-xs text-muted uppercase tracking-wide">Your line</span>
-          <button onClick={onEdit} className="text-xs text-accent">Edit</button>
+          <div className="flex gap-3">
+            <button onClick={onEdit} className="text-xs text-accent">Edit</button>
+            <button onClick={onClear} className="text-xs text-end">Clear key</button>
+          </div>
         </div>
         <p className="font-display text-xl font-medium">{profile.userName}</p>
         <p className="text-muted mt-1 text-sm">{profile.e164} · {profile.country}</p>
-        <p className="text-muted mt-3 text-xs">Language: <span className="text-fg">{profile.language}</span></p>
+        <p className="text-muted mt-2 text-xs">Key: <span className="font-mono">{maskKey(profile.apiKey)}</span></p>
+        <p className="text-muted mt-1 text-xs">Model: openai/gpt-oss-20b</p>
       </div>
       <div className="flex-1 flex flex-col items-center justify-center">
         <button onClick={onCall} className="w-40 h-40 rounded-full bg-accent text-bg font-display text-xl font-semibold shadow-[0_0_60px_rgba(228,160,74,0.35)]">Call Me</button>
@@ -349,7 +414,7 @@ function Live({ profile, onEnd }) {
         await new Promise((res, rej) => { audio.onended = res; audio.onerror = rej; audio.play().catch(rej); });
         URL.revokeObjectURL(url);
         return;
-      } catch (e) { console.warn(e); }
+      } catch (e) { console.warn('tts', e && e.message); }
     }
     await speakDevice(text, lang);
   }
@@ -362,7 +427,7 @@ function Live({ profile, onEnd }) {
     historyRef.current.push({ role: 'user', content: userText });
     push({ role: 'user', text: userText });
     try {
-      const data = await groqChat(profile.apiKey, [
+      const data = await groqChatWithFallback(profile.apiKey, [
         { role: 'system', content: 'You are Nightline, a warm personal AI phone companion speaking to ' + profile.userName + '. Keep replies short (1-3 sentences), conversational, and natural for voice. Identify as an AI when asked. Prefer language: ' + profile.language + '.' },
         ...historyRef.current.slice(-12),
       ]);
@@ -401,16 +466,14 @@ function Live({ profile, onEnd }) {
       const lang = profile.language === 'fa' ? 'fa' : profile.language === 'ar' ? 'ar' : profile.language === 'ur' ? 'ur' : undefined;
       const text = await groqTranscribe(profile.apiKey, blob, lang);
       busyRef.current = false;
-      if (text && text.length > 0) {
-        await chat(text);
-      } else {
+      if (text && text.length > 0) await chat(text);
+      else {
         setError('Did not catch any words — try again.');
         setStatus('listening');
       }
     } catch (e) {
-      const msg = friendlyError(e);
-      setError(msg);
-      push({ role: 'system', text: msg });
+      setError(friendlyError(e));
+      push({ role: 'system', text: friendlyError(e) });
       setStatus('listening');
       busyRef.current = false;
     }
@@ -437,13 +500,11 @@ function Live({ profile, onEnd }) {
         : new MediaRecorder(stream);
       recRef.current = rec;
       chunksRef.current = [];
-      rec.ondataavailable = (ev) => {
-        if (ev.data && ev.data.size > 0) chunksRef.current.push(ev.data);
-      };
+      rec.ondataavailable = (ev) => { if (ev.data && ev.data.size > 0) chunksRef.current.push(ev.data); };
       rec.onstop = () => { processRecording(); };
       rec.start(100);
     } catch (err) {
-      setError('Could not start mic: ' + (err.message || err));
+      setError('Could not start mic');
       setHolding(false);
       setStatus('listening');
     }
@@ -453,16 +514,10 @@ function Live({ profile, onEnd }) {
     if (e && e.preventDefault) e.preventDefault();
     setHolding(false);
     try {
-      if (recRef.current && recRef.current.state === 'recording') {
-        recRef.current.stop();
-      } else if (chunksRef.current.length) {
-        processRecording();
-      } else {
-        setStatus('listening');
-      }
-    } catch {
-      processRecording();
-    }
+      if (recRef.current && recRef.current.state === 'recording') recRef.current.stop();
+      else if (chunksRef.current.length) processRecording();
+      else setStatus('listening');
+    } catch { processRecording(); }
   }
 
   useEffect(() => {
@@ -509,7 +564,7 @@ function Live({ profile, onEnd }) {
         await speak(greet);
         setStatus('listening');
       } catch (e) {
-        setError(friendlyError(e.message || 'Mic denied') + ' — you can still type.');
+        setError('Mic unavailable — you can still type.');
         setStatus('error');
         push({ role: 'system', text: 'Mic unavailable. Type your messages below.' });
       }
@@ -556,16 +611,10 @@ function Live({ profile, onEnd }) {
       </div>
       {error && <div className="mx-5 mb-2 rounded-xl bg-end/10 border border-end/30 px-3 py-2 text-xs text-end">{error}</div>}
       <div className="px-5 pb-4 pt-2 flex flex-col gap-3">
-        <button
-          type="button"
+        <button type="button"
           className={'w-full rounded-2xl py-4 font-semibold text-base select-none ' + (holding ? 'bg-ok text-bg scale-[0.98]' : 'bg-accent text-bg')}
-          onMouseDown={startHold}
-          onMouseUp={endHold}
-          onMouseLeave={() => holding && endHold()}
-          onTouchStart={startHold}
-          onTouchEnd={endHold}
-          onTouchCancel={endHold}
-        >
+          onMouseDown={startHold} onMouseUp={endHold} onMouseLeave={() => holding && endHold()}
+          onTouchStart={startHold} onTouchEnd={endHold} onTouchCancel={endHold}>
           {holding ? 'Release to send…' : 'Hold to talk'}
         </button>
         <div className="flex gap-2">
@@ -586,11 +635,16 @@ function App() {
     if (p) { setProfile(p); setPhase('ready'); }
     setBooted(true);
   }, []);
+  function handleClear() {
+    clearProfile();
+    setProfile(null);
+    setPhase('setup');
+  }
   if (!booted) return <div className="min-h-full flex items-center justify-center"><div className="text-muted text-sm">Loading…</div></div>;
   return (
     <div className="min-h-full flex flex-col bg-bg text-fg">
       {phase === 'setup' && <Setup initial={profile} onSave={p => { saveProfile(p); setProfile(p); setPhase('ready'); }} />}
-      {phase === 'ready' && profile && <Ready profile={profile} onCall={() => setPhase('ringing')} onEdit={() => setPhase('setup')} />}
+      {phase === 'ready' && profile && <Ready profile={profile} onCall={() => setPhase('ringing')} onEdit={() => setPhase('setup')} onClear={handleClear} />}
       {phase === 'ringing' && profile && <Ringing profile={profile} onAnswer={() => setPhase('live')} onDecline={() => setPhase('ready')} />}
       {phase === 'live' && profile && <Live profile={profile} onEnd={() => setPhase('ready')} />}
     </div>
